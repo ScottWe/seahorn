@@ -8,6 +8,7 @@
 #include "seahorn/Support/SeaDebug.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/FileSystem.h"
+#include "llvm/Transforms/Utils/BasicBlockUtils.h"
 
 static llvm::cl::opt<bool>
     ReduceFalse("horn-reduce-constraints",
@@ -226,6 +227,56 @@ void SmallHornifyFunction::runOnFunction(Function &F) {
   allVars.clear();
   side.clear();
   s.reset();
+
+  // Generates rules for uninterpreted predicates.
+  auto &SBI = m_parent.getSBI();
+  auto upredAssertFn
+    = SBI.mkSeaBuiltinFn(SeaBuiltinsOp::UPRED_ASSERT, *F.getParent());
+  for (auto &BB : F) {
+    // Detects an uninterpreted assert.
+    bool foundUpredAssert = false;
+    for (auto &I : BB) {
+      if (isa<CallInst>(&I)) {
+        CallSite CS(&I);
+        const Function *fn = CS.getCalledFunction();
+        if (fn->getName().equals(upredAssertFn->getName())) {
+          foundUpredAssert = true;
+          break;
+        }
+      }
+    }
+    if (!foundUpredAssert) continue;
+
+    allVars.clear();
+    s.reset();
+    side.clear();
+    args.clear();
+
+    const ExprVector &live = ls.live(&BB);
+    for (const Expr &v : live)
+      allVars.insert(s.read(v));
+
+    Expr pre = s.eval(bind::fapp(m_parent.bbPredicate(BB), live));
+    side.push_back(boolop::lneg((s.read(m_sem.errorFlag(BB)))));
+    m_sem.exec(s, BB, side, mk<TRUE>(m_efac));
+
+    // The last three instructions as the call, the coercion, and the assert.
+    side.pop_back();
+    Expr post = side.back();
+    side.pop_back();
+    Expr tau = mknary<AND>(mk<TRUE>(m_efac), side);
+
+    expr::filter(tau, bind::IsConst(),
+                 std::inserter(allVars, allVars.begin()));
+    expr::filter(post, bind::IsConst(),
+                 std::inserter(allVars, allVars.begin()));
+
+    LOG("seahorn",
+        errs() << "Adding upred rule : "
+               << *mk<IMPL>(boolop::land(pre, tau), post)
+               << "\n";);
+      m_db.addRule(allVars, boolop::limp(boolop::land(pre, tau), post));
+  }
 
   // Add error flag exit rules
   // bb (err, V) & err -> bb_exit (err , V)
