@@ -18,6 +18,8 @@ using namespace llvm;
 #define VERIFIER_ASSUME_NOT_FN "verifier.assume.not"
 #define VERIFIER_ASSERT_FN "verifier.assert"
 #define VERIFIER_ASSERT_NOT_FN "verifier.assert.not"
+#define VERIFIER_UPRED_ASSUME_FN "verifier.upred.assume"
+#define VERIFIER_UPRED_ASSERT_FN "verifier.upred.assert"
 #define SEA_IS_DEREFERENCEABLE "sea.is_dereferenceable"
 #define SEA_ASSERT_IF "sea.assert.if"
 #define SEA_BRANCH_SENTINEL "sea.branch_sentinel"
@@ -46,6 +48,8 @@ seahorn::SeaBuiltinsInfo::getSeaBuiltinOp(const llvm::CallBase &cb) const {
       .Case(SEA_ASSERT_IF, SBIOp::ASSERT_IF)
       .Case(VERIFIER_ASSERT_FN, SBIOp::ASSERT)
       .Case(VERIFIER_ASSERT_NOT_FN, SBIOp::ASSERT_NOT)
+      .Case(VERIFIER_UPRED_ASSUME_FN, SBIOp::UPRED_ASSUME)
+      .Case(VERIFIER_UPRED_ASSERT_FN, SBIOp::UPRED_ASSERT)
       .Case(SEA_BRANCH_SENTINEL, SBIOp::BRANCH_SENTINEL)
       .Case(SEA_IS_MODIFIED, SBIOp::IS_MODIFIED)
       .Case(SEA_RESET_MODIFIED, SBIOp::RESET_MODIFIED)
@@ -78,6 +82,10 @@ llvm::Function *SeaBuiltinsInfo::mkSeaBuiltinFn(SeaBuiltinsOp op,
   case SBIOp::ASSERT:
   case SBIOp::ASSERT_NOT:
     return mkAssertFn(M, op);
+  case SBIOp::UPRED_ASSUME:
+    return mkUpredAssume(M);
+  case SBIOp::UPRED_ASSERT:
+    return mkUpredAssert(M);
   case SBIOp::BRANCH_SENTINEL:
     return mkBranchSentinelFn(M);
   case SBIOp::IS_MODIFIED:
@@ -286,6 +294,31 @@ Function *SeaBuiltinsInfo::mkAssertFn(llvm::Module &M, SeaBuiltinsOp op) {
   }
   auto &C = M.getContext();
   auto FC = M.getOrInsertFunction(name, Type::getVoidTy(C), Type::getInt1Ty(C));
+  auto *FN = dyn_cast<Function>(FC.getCallee());
+  if (FN) {
+    FN->setOnlyAccessesInaccessibleMemory();
+    FN->setDoesNotThrow();
+    FN->setDoesNotFreeMemory();
+    FN->setDoesNotRecurse();
+  }
+  return FN;
+}
+
+Function *SeaBuiltinsInfo::mkUpredAssume(llvm::Module &M) {
+  auto &C = M.getContext();
+  auto FC = M.getOrInsertFunction(VERIFIER_UPRED_ASSUME_FN, Type::getVoidTy(C),
+                                  Type::getInt1Ty(C));
+  auto *FN = dyn_cast<Function>(FC.getCallee());
+  if (FN) {
+    setCommonAttrs(*FN);
+  }
+  return FN;
+}
+
+Function *SeaBuiltinsInfo::mkUpredAssert(llvm::Module &M) {
+  auto &C = M.getContext();
+  auto FC = M.getOrInsertFunction(VERIFIER_UPRED_ASSERT_FN, Type::getVoidTy(C),
+                                  Type::getInt1Ty(C));
   auto *FN = dyn_cast<Function>(FC.getCallee());
   if (FN) {
     FN->setOnlyAccessesInaccessibleMemory();

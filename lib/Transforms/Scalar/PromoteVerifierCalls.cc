@@ -50,6 +50,8 @@ bool PromoteVerifierCalls::runOnModule(Module &M) {
   m_errorFn = SBI.mkSeaBuiltinFn(SBIOp::ERROR, M);
   m_is_deref = SBI.mkSeaBuiltinFn(SBIOp::IS_DEREFERENCEABLE, M);
   m_assert_if = SBI.mkSeaBuiltinFn(SBIOp::ASSERT_IF, M);
+  m_upredAssumeFn = SBI.mkSeaBuiltinFn(SBIOp::UPRED_ASSUME, M);
+  m_upredAssertFn = SBI.mkSeaBuiltinFn(SBIOp::UPRED_ASSERT, M);
   m_is_modified = SBI.mkSeaBuiltinFn(SBIOp::IS_MODIFIED, M);
   m_reset_modified = SBI.mkSeaBuiltinFn(SBIOp::RESET_MODIFIED, M);
   m_is_read = SBI.mkSeaBuiltinFn(SBIOp::IS_READ, M);
@@ -165,6 +167,9 @@ bool PromoteVerifierCalls::runOnFunction(Function &F) {
     if (fn && (fn->getName().equals("__VERIFIER_assume") ||
                fn->getName().equals("__VERIFIER_assert") ||
                fn->getName().equals("__VERIFIER_assert_not") ||
+               // Uninterpreted predicates.
+               fn->getName().equals("__VERIFIER_upred_assume") ||
+               fn->getName().equals("__VERIFIER_upred_assert") ||
                // CBMC
                fn->getName().equals("__CPROVER_assume") ||
                /** pagai embedded invariants */
@@ -182,6 +187,10 @@ bool PromoteVerifierCalls::runOnFunction(Function &F) {
         nfn = m_assertFn;
       else if (fn->getName().equals("__VERIFIER_assert_not"))
         nfn = m_assertNotFn;
+      else if (fn->getName().equals("__VERIFIER_upred_assume"))
+        nfn = m_upredAssumeFn;
+      else if (fn->getName().equals("__VERIFIER_upred_assert"))
+        nfn = m_upredAssertFn;
       else if (fn->getName().equals("__CPROVER_assume"))
         nfn = m_assumeFn;
       else

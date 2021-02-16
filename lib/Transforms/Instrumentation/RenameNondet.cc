@@ -69,10 +69,12 @@ public:
     // functions that are replaced by internalizer
     m_externalNames.insert("verifier.assume");
     m_externalNames.insert("verifier.assume.not");
+    m_externalNames.insert("verifier.upred.assume");
     m_externalNames.insert("seahorn.fail");
     m_externalNames.insert("verifier.error");
 
     m_externalNames.insert("__VERIFIER_assume");
+    m_externalNames.insert("__VERIFIER_upred_assume");
     m_externalNames.insert("__VERIFIER_error");
 
     m_externalNames.insert("__seahorn_get_value_i8");
