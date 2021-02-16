@@ -34,6 +34,7 @@ llvm::Pass *createDeadNondetElimPass();
 llvm::Pass *createDummyExitBlockPass();
 llvm::Pass *createDummyMainFunctionPass();
 llvm::Pass *createOneAssumePerBlockPass();
+llvm::Pass *createEndBlockOnUpredAssertPass();
 llvm::Pass *createExternalizeAddressTakenFunctionsPass();
 llvm::Pass *createExternalizeFunctionsPass();
 llvm::Pass *createSliceFunctionsPass();
