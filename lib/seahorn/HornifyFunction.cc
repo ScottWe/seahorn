@@ -4,6 +4,7 @@
 #include "seahorn/Support/CFG.hh"
 #include "seahorn/Support/ExprSeahorn.hh"
 #include "seahorn/Support/Stats.hh"
+#include "seahorn/Transforms/Instrumentation/GenerateUpredPass.hh"
 
 #include "seahorn/Support/SeaDebug.h"
 #include "llvm/Support/CommandLine.h"
@@ -38,6 +39,7 @@ void HornifyFunction::extractFunctionInfo(const BasicBlock &BB) {
     return;
 
   FunctionInfo &fi = m_sem.getFunctionInfo(F);
+  fi.isUpred = GenerateUpredPass::isUpred(F);
 
   // reserved arguments:
   //  1. enabled flag
@@ -46,53 +48,56 @@ void HornifyFunction::extractFunctionInfo(const BasicBlock &BB) {
   Expr boolSort = sort::boolTy(m_efac);
   ExprVector sorts{boolSort, boolSort, boolSort};
 
-  // memory regions
-  for (const Instruction &inst : BB) {
-    if (const CallInst *ci = dyn_cast<const CallInst>(&inst)) {
-      CallSite CS(const_cast<CallInst *>(ci));
-      const Function *cf = CS.getCalledFunction();
-      if (cf && (cf->getName().equals("shadow.mem.in") ||
-                 cf->getName().equals("shadow.mem.out"))) {
-        const Value &v = *CS.getArgument(1);
-        Expr r = m_sem.symb(v);
-        if (!r)
-          continue;
-        fi.regions.push_back(&v);
-        sorts.push_back(bind::typeOf(r));
+  // memory regions (omitted from uninterpreted predicates)
+  if (!fi.isUpred) {
+    for (const Instruction &inst : BB) {
+      if (const CallInst *ci = dyn_cast<const CallInst>(&inst)) {
+        CallSite CS(const_cast<CallInst *>(ci));
+        const Function *cf = CS.getCalledFunction();
+        if (cf && (cf->getName().equals("shadow.mem.in") ||
+                  cf->getName().equals("shadow.mem.out"))) {
+          const Value &v = *CS.getArgument(1);
+          Expr r = m_sem.symb(v);
+          if (!r)
+            continue;
+          fi.regions.push_back(&v);
+          sorts.push_back(bind::typeOf(r));
+        }
       }
     }
   }
 
   const ExprVector &live = m_parent.live(BB);
 
-  // live arguments
-  for (const Argument &arg :
-       boost::make_iterator_range(F.arg_begin(), F.arg_end())) {
-    if (!m_sem.isTracked(arg))
+  // live arguments (omitted from uninterpreted predicates)
+  for (const Argument &arg : F.args()) {
+    if (!fi.isUpred && !m_sem.isTracked(arg))
       continue;
     Expr v = m_sem.symb(arg);
     if (!v)
       continue;
 
-    if (!std::binary_search(live.begin(), live.end(), v))
+    if (!fi.isUpred && !std::binary_search(live.begin(), live.end(), v))
       continue;
 
     fi.args.push_back(&arg);
     sorts.push_back(bind::typeOf(v));
   }
 
-  // live globals
-  for (Expr v : live) {
-    Expr u = bind::fname(bind::fname(v));
-    if (!isOpX<VALUE>(u))
-      continue;
+  // live globals (omitted from uninterpreted predicates)
+  if (!fi.isUpred) {
+    for (Expr v : live) {
+      Expr u = bind::fname(bind::fname(v));
+      if (!isOpX<VALUE>(u))
+        continue;
 
-    const Value *val = getTerm<const Value *>(u);
-    if (!m_sem.isTracked(*val))
-      continue;
-    if (const GlobalVariable *gv = dyn_cast<const GlobalVariable>(val)) {
-      fi.globals.push_back(gv);
-      sorts.push_back(bind::typeOf(v));
+      const Value *val = getTerm<const Value *>(u);
+      if (!m_sem.isTracked(*val))
+        continue;
+      if (const GlobalVariable *gv = dyn_cast<const GlobalVariable>(val)) {
+        fi.globals.push_back(gv);
+        sorts.push_back(bind::typeOf(v));
+      }
     }
   }
 
@@ -138,13 +143,16 @@ void HornifyFunction::extractFunctionInfo(const BasicBlock &BB) {
   m_db.addRule(allVars, bind::fapp(fi.sumPred, postArgs));
 
   // -- expose basic properties of the summary
-  postArgs[0] = bind::boolConst(mkTerm(std::string("arg.0"), m_efac));
-  postArgs[1] = bind::boolConst(mkTerm(std::string("arg.1"), m_efac));
-  postArgs[2] = bind::boolConst(mkTerm(std::string("arg.2"), m_efac));
-  m_db.addConstraint(
+  // For uninterpreted predicates, a summary must be synthesized.
+  if (!fi.isUpred) {
+    postArgs[0] = bind::boolConst(mkTerm(std::string("arg.0"), m_efac));
+    postArgs[1] = bind::boolConst(mkTerm(std::string("arg.1"), m_efac));
+    postArgs[2] = bind::boolConst(mkTerm(std::string("arg.2"), m_efac));
+    m_db.addConstraint(
       bind::fapp(fi.sumPred, postArgs),
       mk<AND>(mk<OR>(postArgs[0], mk<EQ>(postArgs[1], postArgs[2])),
               mk<OR>(mk<NEG>(postArgs[0]), mk<NEG>(postArgs[1]), postArgs[2])));
+  }
 }
 
 void SmallHornifyFunction::runOnFunction(Function &F) {
@@ -157,9 +165,6 @@ void SmallHornifyFunction::runOnFunction(Function &F) {
     WARN << "the exit block of function " << F.getName() << " is unreachable";
     return;
   }
-
-  DenseMap<const BasicBlock *, Expr> pred;
-  ExprVector sorts;
 
   const LiveSymbols &ls = m_parent.getLiveSybols(F);
 
@@ -174,6 +179,14 @@ void SmallHornifyFunction::runOnFunction(Function &F) {
     // -- also constructs summary predicates
     if (m_interproc)
       extractFunctionInfo(BB);
+  }
+  
+  // If F is an uninterpreted predicate fragment, it should not have a body.
+  const FunctionInfo &fi = m_sem.getFunctionInfo(F);
+  if (fi.isUpred) {
+    LOG("seahorn",
+        errs() << "Adding upred base case: " << F.getName().str() << "\n");
+    return;
   }
 
   BasicBlock &entry = F.getEntryBlock();
@@ -321,7 +334,6 @@ void SmallHornifyFunction::runOnFunction(Function &F) {
 
     Expr falseE = mk<FALSE>(m_efac);
     ExprVector postArgs{mk<TRUE>(m_efac), falseE, falseE};
-    const FunctionInfo &fi = m_sem.getFunctionInfo(F);
     evalArgs(fi, m_sem, s, std::back_inserter(postArgs));
     // -- use a mutable gate to put everything together
     expr::filter(mknary<OUT_G>(postArgs), bind::IsConst(),
@@ -356,8 +368,6 @@ void LargeHornifyFunction::runOnFunction(Function &F) {
 
   CutPointGraph &cpg = m_parent.getCpg(F);
   const LiveSymbols &ls = m_parent.getLiveSybols(F);
-
-  ExprVector sorts;
 
   for (const CutPoint &cp : cpg) {
     Expr decl = m_parent.bbPredicate(cp.bb());

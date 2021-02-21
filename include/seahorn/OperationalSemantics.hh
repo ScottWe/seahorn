@@ -172,6 +172,8 @@ struct FunctionInfo {
   llvm::SmallVector<const llvm::GlobalVariable *, 8> globals;
   /// return value. NULL if the function is void or return is not tracked
   const llvm::Value *ret = nullptr;
+  /// Indicates whether the function is an uninterpreted predicate fragment.
+  bool isUpred = false;
 
   FunctionInfo() = default;
 };
