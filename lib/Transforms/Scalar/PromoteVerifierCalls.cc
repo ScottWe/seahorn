@@ -167,9 +167,6 @@ bool PromoteVerifierCalls::runOnFunction(Function &F) {
     if (fn && (fn->getName().equals("__VERIFIER_assume") ||
                fn->getName().equals("__VERIFIER_assert") ||
                fn->getName().equals("__VERIFIER_assert_not") ||
-               // Uninterpreted predicates.
-               fn->getName().equals("__VERIFIER_upred_assume") ||
-               fn->getName().equals("__VERIFIER_upred_assert") ||
                // CBMC
                fn->getName().equals("__CPROVER_assume") ||
                /** pagai embedded invariants */
@@ -187,10 +184,6 @@ bool PromoteVerifierCalls::runOnFunction(Function &F) {
         nfn = m_assertFn;
       else if (fn->getName().equals("__VERIFIER_assert_not"))
         nfn = m_assertNotFn;
-      else if (fn->getName().equals("__VERIFIER_upred_assume"))
-        nfn = m_upredAssumeFn;
-      else if (fn->getName().equals("__VERIFIER_upred_assert"))
-        nfn = m_upredAssertFn;
       else if (fn->getName().equals("__CPROVER_assume"))
         nfn = m_assumeFn;
       else
@@ -201,6 +194,29 @@ bool PromoteVerifierCalls::runOnFunction(Function &F) {
       CallInst *ci = Builder.CreateCall(nfn, cond);
       if (cg)
         (*cg)[&F]->addCalledFunction(ci, (*cg)[ci->getCalledFunction()]);
+
+      toKill.push_back(&I);
+    } else if (fn && (fn->getName().equals("__VERIFIER_upred_assume") ||
+                      fn->getName().equals("__VERIFIER_upred_assert"))) {
+      Function *nfn;
+      if (fn->getName().equals("__VERIFIER_upred_assume"))
+        nfn = m_upredAssumeFn;
+      else if (fn->getName().equals("__VERIFIER_upred_assert"))
+        nfn = m_upredAssertFn;
+      else
+        assert(false);
+
+      IRBuilder<> Builder(F.getContext());
+      Builder.SetInsertPoint(&I);
+
+      CallInst *predI = Builder.CreateCall(nfn, CS.getArgument(0));
+      auto *cond = Builder.CreateICmpEQ(CS.getArgument(0), Builder.getInt32(1));
+      CallInst *chckI = Builder.CreateCall(m_assumeFn, cond);
+
+      if (cg) {
+        (*cg)[&F]->addCalledFunction(predI, (*cg)[predI->getCalledFunction()]);
+        (*cg)[&F]->addCalledFunction(chckI, (*cg)[chckI->getCalledFunction()]);
+      }
 
       toKill.push_back(&I);
     } else if (fn && fn->getName().equals("__VERIFIER_error")) {

@@ -22,6 +22,8 @@ class GenerateUpredPass : public llvm::ModulePass {
 private:
   static const std::string PREFIX;
 
+  Function *m_assumeFn;
+
 public:
   static char ID;
 

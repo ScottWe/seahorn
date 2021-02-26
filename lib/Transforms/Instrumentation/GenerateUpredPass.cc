@@ -25,6 +25,7 @@ void GenerateUpredPass::getAnalysisUsage(AnalysisUsage &AU) const {
 
 bool GenerateUpredPass::runOnModule(Module &M) {
   auto &SBI = getAnalysis<SeaBuiltinsInfoWrapperPass>().getSBI();
+  m_assumeFn = SBI.mkSeaBuiltinFn(SeaBuiltinsOp::ASSUME, M);
 
   bool changed = false;
   for (auto &F : M) {
@@ -39,6 +40,8 @@ bool GenerateUpredPass::runOnFunction(SeaBuiltinsInfo &SBI, Function &F) {
   // Provides a placeholder implementation to each upred external call.
   bool changed = false;
   for (auto &B : F) {
+    IRBuilder<> builder(&B);
+
     for (auto &I : B) {
       // Does I call a user defined function.
       CallBase *CI = dyn_cast<CallBase>(&I);
@@ -75,6 +78,10 @@ bool GenerateUpredPass::runOnFunction(SeaBuiltinsInfo &SBI, Function &F) {
           errs() << "Found upred external call " << CF->getName().str()
                  << " in " << F.getName().str() << ".\n");
 
+      // Assumes that the call never happens.
+      builder.SetInsertPoint(&I);
+      CallInst *ci = builder.CreateCall(m_assumeFn, builder.getFalse());
+
       // Generates a placeholder body.
       std::vector<Value *> forwardArgs;
       for (auto &arg : CF->args()) forwardArgs.push_back(&arg);
@@ -82,9 +89,9 @@ bool GenerateUpredPass::runOnFunction(SeaBuiltinsInfo &SBI, Function &F) {
       CF->addFnAttr(Attribute::NoInline);
       CF->addFnAttr(Attribute::OptimizeNone);
       BasicBlock* block = BasicBlock::Create(CF->getContext(), "entry", CF);
-      IRBuilder<> builder(block);
-      auto rec_call = builder.CreateCall(CF, forwardArgs);
-      builder.CreateRet(rec_call);
+      IRBuilder<> predBuilder(block);
+      auto prev_rv = predBuilder.getInt32(0);
+      predBuilder.CreateRet(prev_rv);
     }
   }
 

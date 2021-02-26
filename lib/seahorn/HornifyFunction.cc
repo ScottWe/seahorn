@@ -246,49 +246,68 @@ void SmallHornifyFunction::runOnFunction(Function &F) {
   auto upredAssertFn
     = SBI.mkSeaBuiltinFn(SeaBuiltinsOp::UPRED_ASSERT, *F.getParent());
   for (auto &BB : F) {
-    // Detects an uninterpreted assert.
-    bool foundUpredAssert = false;
+    // Identifies all assertions.
+    std::list<llvm::Value *> preds;
     for (auto &I : BB) {
       if (isa<CallInst>(&I)) {
         CallSite CS(&I);
         const Function *fn = CS.getCalledFunction();
         if (fn->getName().equals(upredAssertFn->getName())) {
-          foundUpredAssert = true;
-          break;
+          // The argument to verifier.upred.assert is the predicate.
+          auto pred = CS.getArgument(0);
+          assert(isa<CallInst>(pred));
+          preds.push_back(pred);
         }
       }
     }
-    if (!foundUpredAssert) continue;
-
-    allVars.clear();
-    s.reset();
-    side.clear();
-    args.clear();
+    if (preds.empty()) continue;
 
     const ExprVector &live = ls.live(&BB);
-    for (const Expr &v : live)
-      allVars.insert(s.read(v));
 
-    Expr pre = s.eval(bind::fapp(m_parent.bbPredicate(BB), live));
-    side.push_back(boolop::lneg((s.read(m_sem.errorFlag(BB)))));
-    m_sem.exec(s, BB, side, mk<TRUE>(m_efac));
+    // Generates a rule for each upred assertion.
+    for (auto &I : BB) {
+      if (preds.empty()) break;
+      m_sem.addToFilter(I);
 
-    // The last three instructions as the call, the coercion, and the assert.
-    side.pop_back();
-    Expr post = side.back();
-    side.pop_back();
-    Expr tau = mknary<AND>(mk<TRUE>(m_efac), side);
+      if (preds.front() == &I) {
+        preds.pop_front();
 
-    expr::filter(tau, bind::IsConst(),
-                 std::inserter(allVars, allVars.begin()));
-    expr::filter(post, bind::IsConst(),
-                 std::inserter(allVars, allVars.begin()));
+        // The live variables can be computed once for the block.
+        for (const Expr &v : live)
+          allVars.insert(s.read(v));
 
-    LOG("seahorn",
-        errs() << "Adding upred rule : "
-               << *mk<IMPL>(boolop::land(pre, tau), post)
-               << "\n";);
-      m_db.addRule(allVars, boolop::limp(boolop::land(pre, tau), post));
+        Expr pre = s.eval(bind::fapp(m_parent.bbPredicate(BB), live));
+        side.push_back(boolop::lneg((s.read(m_sem.errorFlag(BB)))));
+        m_sem.exec(s, BB, side, mk<TRUE>(m_efac));
+
+        // The last instruction is the uninterpreted predicate.
+        Expr post = side.back();
+        side.pop_back();
+
+        // Assume a-priori that the upred call returns 1.
+        auto predRv = m_sem.lookup(s, I);
+        side.push_back(mk<EQ>(predRv, mkTerm<mpz_class>(1, m_efac)));
+        Expr tau = mknary<AND>(mk<TRUE>(m_efac), side);
+
+        expr::filter(tau, bind::IsConst(),
+                     std::inserter(allVars, allVars.begin()));
+        expr::filter(post, bind::IsConst(),
+                     std::inserter(allVars, allVars.begin()));
+
+        LOG("seahorn",
+            errs() << "Adding upred rule : "
+                   << *mk<IMPL>(boolop::land(pre, tau), post)
+                   << "\n";);
+        m_db.addRule(allVars, boolop::limp(boolop::land(pre, tau), post));
+
+        allVars.clear();
+        s.reset();
+        side.clear();
+      }
+    }
+    assert(preds.empty());
+
+    m_sem.resetFilter();
   }
 
   // Add error flag exit rules

@@ -307,7 +307,7 @@ Function *SeaBuiltinsInfo::mkAssertFn(llvm::Module &M, SeaBuiltinsOp op) {
 Function *SeaBuiltinsInfo::mkUpredAssume(llvm::Module &M) {
   auto &C = M.getContext();
   auto FC = M.getOrInsertFunction(VERIFIER_UPRED_ASSUME_FN, Type::getVoidTy(C),
-                                  Type::getInt1Ty(C));
+                                  Type::getInt32Ty(C));
   auto *FN = dyn_cast<Function>(FC.getCallee());
   if (FN) {
     setCommonAttrs(*FN);
@@ -318,7 +318,7 @@ Function *SeaBuiltinsInfo::mkUpredAssume(llvm::Module &M) {
 Function *SeaBuiltinsInfo::mkUpredAssert(llvm::Module &M) {
   auto &C = M.getContext();
   auto FC = M.getOrInsertFunction(VERIFIER_UPRED_ASSERT_FN, Type::getVoidTy(C),
-                                  Type::getInt1Ty(C));
+                                  Type::getInt32Ty(C));
   auto *FN = dyn_cast<Function>(FC.getCallee());
   if (FN) {
     FN->setOnlyAccessesInaccessibleMemory();

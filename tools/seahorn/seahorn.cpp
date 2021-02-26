@@ -371,7 +371,6 @@ int main(int argc, char **argv) {
   pass_manager.add(seahorn::createStripLifetimePass());
   pass_manager.add(seahorn::createDeadNondetElimPass());
 
-  pass_manager.add(seahorn::createEndBlockOnUpredAssertPass());
   if (OneAssumePerBlock) {
     // -- it must be called after all the cfg simplifications
     pass_manager.add(seahorn::createOneAssumePerBlockPass());
